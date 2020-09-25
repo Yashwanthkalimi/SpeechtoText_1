@@ -1,9 +1,11 @@
 package com.example.speechtotext;
 
 import android.app.Service;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -17,18 +19,31 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Locale;
 
 //import android.support.annotation.Nullable;
 //import android.support.v4.content.LocalBroadcastManager;
 import hu.pe.yummykart.broadcastdemo.R;
+import opennlp.tools.namefind.NameFinderME;
+import opennlp.tools.namefind.TokenNameFinderModel;
+import opennlp.tools.tokenize.TokenizerME;
+import opennlp.tools.tokenize.TokenizerModel;
+import opennlp.tools.util.Span;
 
 
 public class ServiceClass extends Service
 {
     //  BroadcastReceiver mRegistrationBroadcastReceiver;
 public EditText textView= SendBroadcast.textView1;
-public static String voice2 ;
+public static String voice2;
+    private Accelerometer accelerometer;
+    private Gyroscope gyroscope;
+    String tokens[]= null;
+    LocationFinder locationFinder;
     //  TextView tv_result;
     //  Button btn_start,btn_stop;
 //    textView =(TextView)findViewById(R.id.textView);
@@ -51,34 +66,36 @@ public static String voice2 ;
     private AudioManager audioManager;
     private Handler restartDroidSpeech = new Handler();
     private Handler speechPartialResult = new Handler();
+    private Span nameSpans[];
 
     @Override
     public void onStart(Intent intent, int startId)
     {
         super.onStart(intent, startId);
-
+        accelerometer.register();
         //  LocalBroadcastManager.getInstance(this).registerReceiver(mRegistrationBroadcastReceiver, new IntentFilter("SENDMSG"));
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId)
     {
-        setRecognitionProgressMsg("");
-        startSpeechRecognition();
-      /*  mRegistrationBroadcastReceiver = new BroadcastReceiver()
-        {
+        accelerometer= new Accelerometer(this);
+        gyroscope= new Gyroscope(this);
+        accelerometer.setListener(new Accelerometer.Listener() {
             @Override
-            public void onReceive(Context context, Intent intent)
-            {
-                // checking for type intent filter
-                if(intent.getAction().equals("SENDMSG"))
-                {
-                    String string = intent.getStringExtra("message");
-                    Toast.makeText(getApplicationContext(), string,Toast.LENGTH_LONG).show();
-                    stopSelf();
+            public void onTranslate(float tx, float ty, float tz) {
+                if  (tx >1.0f || tx<-1.0f || ty >1.0f || ty<-1.0f || tz >1.0f || tz<-1.0f){
+                    setRecognitionProgressMsg("");
+                    startSpeechRecognition();
                 }
+//                else{
+//                    mSpeechRecognizer.stopListening();
+//                    editText.setHint("You will see input here");
+//
+//                }
             }
-        };*/
+        });
+
 
 
 
@@ -96,6 +113,7 @@ public static String voice2 ;
     public void onDestroy()
     {
         super.onDestroy();
+        accelerometer.deregister();
         // LocalBroadcastManager.getInstance(this).unregisterReceiver(mRegistrationBroadcastReceiver);
     }
 
@@ -187,15 +205,20 @@ public static String voice2 ;
 
     private void restartDroidSpeechRecognition()
     {
-        restartDroidSpeech.postDelayed(new Runnable() {
-
+        accelerometer.setListener(new Accelerometer.Listener() {
             @Override
-            public void run()
-            {
-                startSpeechRecognition();
+            public void onTranslate(float tx, float ty, float tz) {
+                if  (tx >1.0f || tx<-1.0f || ty >1.0f || ty<-1.0f || tz >1.0f || tz<-1.0f){
+                    setRecognitionProgressMsg("");
+                    startSpeechRecognition();
+                }
+//                else{
+//                    mSpeechRecognizer.stopListening();
+//                    editText.setHint("You will see input here");
+//
+//                }
             }
-
-        }, MAX_PAUSE_TIME);
+        });
     }
 
 
@@ -252,29 +275,7 @@ public static String voice2 ;
             @Override
             public void onError(int error)
             {
-                long duration = System.currentTimeMillis() - startListeningTime;
-
-                // If duration is less than the "error timeout" as the system didn't try listening to the user speech so ignoring
-                if(duration < ERROR_TIMEOUT && error == SpeechRecognizer.ERROR_NO_MATCH && !onReadyForSpeech)
-                    return;
-
-                if(onReadyForSpeech && duration < AUDIO_BEEP_DISABLED_TIMEOUT)
-                {
-                    // Disabling audio beep if less than "audio beep disabled timeout", as it will be
-                    // irritating for the user to hear the beep sound again and again
-                    muteAudio(true);
-                }
-                else
-                {
-                    // If audio beep was muted, enabling it again
-                    muteAudio(true);//f
-                }
-
-                if(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_AUDIO)
-                {
-                    // Restart droid speech recognition
-                    restartDroidSpeechRecognition();
-                }
+//
             }
 
             @Override
@@ -295,75 +296,53 @@ public static String voice2 ;
 
                 if(valid)
                 {
-                    // Getting the droid speech final result
-                    String speechFinalResult = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0);
 
+                    String speechFinalResult = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0);
+//
+
+
+                    textView.setText(speechFinalResult);
                     setRecognitionProgressMsg(speechFinalResult);
 
-                    // Start droid speech recognition again
+
+
+
+//
+                locationFinder=new LocationFinder(speechFinalResult,getApplicationContext());
+                    try{
+
+
+                        Uri uri =Uri.parse("google.navigation:q="+speechFinalResult+"&mode=l");
+                        Intent intent = new Intent(Intent.ACTION_VIEW,uri);
+
+                        intent.setPackage("com.google.android.apps.maps");
+
+                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(intent);
+                    }catch (ActivityNotFoundException e) {
+
+                        Uri uri =Uri.parse("https://play.google.com/store/apps/details?id=com.google.android.apps.maps");
+
+                        Intent intent = new Intent(Intent.ACTION_VIEW,uri);
+
+                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                        startActivity(intent);
+                    }
                     startSpeechRecognition();
                 }
+                    // Start droid speech recognition again
                 else
                 {
                     // No match found, restart droid speech recognition
-                    restartDroidSpeechRecognition();
-                }
-            }
+                   startSpeechRecognition();
+                }}
+
 
             @Override
             public void onPartialResults(Bundle partialResults)
             {
-                if(speechResultFound) return;
-
-                Boolean valid = (partialResults != null && partialResults.containsKey(SpeechRecognizer.RESULTS_RECOGNITION) &&
-                        partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) != null &&
-                        partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).size() > 0 &&
-                        !partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0).trim().isEmpty());
-
-                if(valid)
-                {
-                    final String liveSpeechResult = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).get(0);
-
-                    // Setting the progress message
-                    setRecognitionProgressMsg(liveSpeechResult);
-                    textView.setText(liveSpeechResult);
-                    if((System.currentTimeMillis() - pauseAndSpeakTime) > MAX_PAUSE_TIME)
-                    {
-                        speechResultFound = true;
-
-                        speechPartialResult.postDelayed(new Runnable()
-                        {
-                            @Override
-                            public void run()
-                            {
-                                // Closing droid speech operations
-                                closeSpeech();
-
-                                setRecognitionProgressMsg(liveSpeechResult);
-
-                                if(continuousSpeechRecognition)
-                                {
-                                    // Start droid speech recognition again
-                                    startSpeechRecognition();
-                                }
-                                else
-                                {
-                                    // Closing the droid speech operations
-                                    closeSpeechOperations();
-                                }
-                            }
-
-                        }, PARTIAL_DELAY_TIME);
-                    }
-                    else
-                    {
-                        pauseAndSpeakTime = System.currentTimeMillis();
-                    }
-                }
-                else
-                {
-                    pauseAndSpeakTime = System.currentTimeMillis();
-                }
+//
             }
 
             @Override
