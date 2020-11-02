@@ -12,7 +12,11 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.audiofx.NoiseSuppressor;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -31,6 +35,8 @@ import java.util.Set;
 
 import hu.pe.yummykart.broadcastdemo.R;
 
+import static com.example.speechtotext.ServiceClass.speechFinalResult;
+
 //import android.support.v4.content.LocalBroadcastManager;
 //import android.support.v7.app.AppCompatActivity;
 
@@ -48,6 +54,9 @@ public class SendBroadcast extends AppCompatActivity
     BluetoothManager bMgr = null;
     private Set<BluetoothDevice> devices;
     private MyReceiver receiver;
+    private ServiceClass serviceClass;
+    private AudioRecord audioRecord;
+
     IntentFilter filter1 = new IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED);
     IntentFilter filter2 = new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED);
     ToggleButton tb1 = null;
@@ -140,6 +149,7 @@ public class SendBroadcast extends AppCompatActivity
         btn1 = (Button)findViewById(R.id.btn1);
         bt2 =(Button)findViewById(R.id.btn2);
         textView1 =(EditText) findViewById(R.id.textView);
+//        textView1.setText(speechFinalResult);
         requestForAudioPermission();
         btAdapter = BluetoothAdapter.getDefaultAdapter();
         devices = btAdapter.getBondedDevices();
@@ -150,8 +160,17 @@ public class SendBroadcast extends AppCompatActivity
                 showChangeLanguageDialog();
             }
         });
+        int N = AudioRecord.getMinBufferSize(48000, AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
+        audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, 8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, N*10);
+        int sessionId = audioRecord.getAudioSessionId();
+        NoiseSuppressor noiseSuppresor = NoiseSuppressor.create(sessionId);
 
-
+        if(noiseSuppresor == null){
+            Toast.makeText(this, "No Suppersor", Toast.LENGTH_LONG).show();
+        }else{
+            Toast.makeText(this, "Have Suppersor", Toast.LENGTH_LONG).show();
+        }
+    ((AudioManager)getSystemService(Context.AUDIO_SERVICE)).setParameters("noise_suppression=on");
         btn1.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v)
@@ -172,7 +191,10 @@ public class SendBroadcast extends AppCompatActivity
             }
         });
     }
+    protected void onPause() {
+        super.onPause();
 
+    }
     public boolean checkForAudioPermissions(Context context)
     {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
@@ -222,9 +244,12 @@ public class SendBroadcast extends AppCompatActivity
     {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
+
     protected void onDestroy() {
         audioM.setMode(AudioManager.MODE_NORMAL);
         audioM.setSpeakerphoneOn(true);
+        Intent intent = new Intent(getApplicationContext(), ServiceClass.class);
+        stopService(intent);
         super.onDestroy();
     }
 }
