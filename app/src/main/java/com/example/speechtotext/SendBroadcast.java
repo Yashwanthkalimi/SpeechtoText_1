@@ -2,24 +2,40 @@ package com.example.speechtotext;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.audiofx.NoiseSuppressor;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.Toast;
+import android.widget.ToggleButton;
 
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.Locale;
+import java.util.Set;
 
 import hu.pe.yummykart.broadcastdemo.R;
+
+import static com.example.speechtotext.ServiceClass.speechFinalResult;
 
 //import android.support.v4.content.LocalBroadcastManager;
 //import android.support.v7.app.AppCompatActivity;
@@ -32,6 +48,19 @@ public class SendBroadcast extends AppCompatActivity
 //  static public String voice1;
     Button btn1,bt2;
     ImageButton language;
+    AudioManager audioM = null;
+    BluetoothAdapter btAdapter;
+    public static Context ctx;
+    BluetoothManager bMgr = null;
+    private Set<BluetoothDevice> devices;
+    private MyReceiver receiver;
+    private ServiceClass serviceClass;
+    private AudioRecord audioRecord;
+
+    IntentFilter filter1 = new IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED);
+    IntentFilter filter2 = new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+    ToggleButton tb1 = null;
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
     private void showChangeLanguageDialog() {
         final String[] listitems = {"English-INDIA", "English-US", "English-UK", "हिन्दी", "മലയാളം", "தமிழ்", "తెలుగు",
                 "ಕನ್ನಡ", "español", "French", "मराठी"};
@@ -105,15 +134,25 @@ public class SendBroadcast extends AppCompatActivity
         editor.putString("My_Lang",lang);
         editor.apply();
     }
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR2)
     @Override
     protected void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        ctx = getApplicationContext();
+        this.registerReceiver(receiver, filter1);
+        this.registerReceiver(receiver, filter2);
+        tb1 = (ToggleButton)findViewById(R.id.toggleButton1);
+        audioM = (AudioManager) getApplicationContext().getSystemService(getApplicationContext().AUDIO_SERVICE);
+        bMgr =  (BluetoothManager) getApplicationContext().getSystemService(getApplicationContext().BLUETOOTH_SERVICE);
         btn1 = (Button)findViewById(R.id.btn1);
         bt2 =(Button)findViewById(R.id.btn2);
         textView1 =(EditText) findViewById(R.id.textView);
+//        textView1.setText(speechFinalResult);
         requestForAudioPermission();
+        btAdapter = BluetoothAdapter.getDefaultAdapter();
+        devices = btAdapter.getBondedDevices();
         language = (ImageButton) findViewById(R.id.imageView2);
         language.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -121,8 +160,17 @@ public class SendBroadcast extends AppCompatActivity
                 showChangeLanguageDialog();
             }
         });
+        int N = AudioRecord.getMinBufferSize(48000, AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
+        audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, 8000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, N*10);
+        int sessionId = audioRecord.getAudioSessionId();
+        NoiseSuppressor noiseSuppresor = NoiseSuppressor.create(sessionId);
 
-
+        if(noiseSuppresor == null){
+            Toast.makeText(this, "No Suppersor", Toast.LENGTH_LONG).show();
+        }else{
+            Toast.makeText(this, "Have Suppersor", Toast.LENGTH_LONG).show();
+        }
+    ((AudioManager)getSystemService(Context.AUDIO_SERVICE)).setParameters("noise_suppression=on");
         btn1.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v)
@@ -143,10 +191,43 @@ public class SendBroadcast extends AppCompatActivity
             }
         });
     }
+    protected void onPause() {
+        super.onPause();
 
+    }
     public boolean checkForAudioPermissions(Context context)
     {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public void onToggleClicked(View view) {
+
+        boolean on = ((ToggleButton) view).isChecked();
+
+        if (on) {
+            if((MyReceiver.isBTConnected == true) || (devices.size() > 0))
+            {
+                audioM.setMode(audioM.MODE_IN_COMMUNICATION);
+                audioM.setBluetoothScoOn(true);
+                audioM.startBluetoothSco();
+                audioM.setSpeakerphoneOn(false);
+                Log.d("Yashwanth","Toggle Button On!");
+            }
+            else
+            {
+                tb1.setChecked(false);
+                Toast.makeText(getApplicationContext(), "BT is not connected, Pls pair your device and restart the app again!", Toast.LENGTH_LONG).show();
+            }
+
+        } else {
+            audioM.setMode(audioM.MODE_NORMAL);
+            audioM.setBluetoothScoOn(false);
+            audioM.stopBluetoothSco();
+            audioM.setSpeakerphoneOn(true);
+            Log.d("Yashwanth","Toggle Button Off!");
+
+        }
+
     }
 
     public void requestForAudioPermission()
@@ -162,5 +243,13 @@ public class SendBroadcast extends AppCompatActivity
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults)
     {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    protected void onDestroy() {
+        audioM.setMode(AudioManager.MODE_NORMAL);
+        audioM.setSpeakerphoneOn(true);
+        Intent intent = new Intent(getApplicationContext(), ServiceClass.class);
+        stopService(intent);
+        super.onDestroy();
     }
 }
